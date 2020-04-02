@@ -16,7 +16,7 @@ import os
 import sys
 import inspect
 
-cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../BLE_Gateway/BLE-Bluepy")))
+cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../ble_gateway/BLE-Bluepy")))
 sys.path.insert(0, cmd_subfolder)
 
 '''
@@ -831,7 +831,7 @@ def main():
     global _logger
 
     parse = SolidSenseParserHelper(
-        description="BLE Transport service arguments",
+        description="SolidSense MQTT service arguments",
     )
     parse.init_config()
 
@@ -841,7 +841,7 @@ def main():
 
 
 
-    log = LoggerHelper(module_name="BLEService", level='error')
+    log = LoggerHelper(module_name="SolidSense-MQTT", level='error')
     _logger = log.setup()
     BLE_Client.BLE_init_parameters()
     # Set debug level

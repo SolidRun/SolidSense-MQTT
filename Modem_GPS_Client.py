@@ -13,7 +13,7 @@ import os
 import sys
 import inspect
 
-cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../Modem_GPS_Service")))
+cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../modem_gps")))
 sys.path.insert(0, cmd_subfolder)
 
 import threading
