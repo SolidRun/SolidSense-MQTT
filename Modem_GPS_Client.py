@@ -19,6 +19,7 @@ sys.path.insert(0, cmd_subfolder)
 import threading
 import logging
 import time
+import json
 import grpc
 from GPS_Service_pb2 import *
 import GPS_Service_pb2_grpc
@@ -26,8 +27,8 @@ import GPS_Service_pb2_grpc
 
 class Modem_GPS_GRPC_Client() :
 
-    s_attr=('fix','timestamp','nbsat','date','hdop')
-    v_attr=('fix','timestamp','latitude','longitude','SOG','COG')
+    s_attr=('fix','gps_time','nbsat','date','hdop')
+    v_attr=('fix','gps_time','latitude','longitude','altitude','SOG','COG')
     mf_attr=('model','IMEI','IMSI','ICCID','network_reg','PLMNID','network_name','rat','band','lac','ci','rssi')
     ms_attr=('network_reg','PLMNID','network_name','rat','band','lac','ci','rssi')
 
@@ -39,6 +40,7 @@ class Modem_GPS_GRPC_Client() :
         self._stub= GPS_Service_pb2_grpc.GPS_ServiceStub(self._channel)
         self._gps_running=False
         self._modem_running=False
+        self._streamer=None
 
 
 
@@ -103,6 +105,12 @@ class Modem_GPS_GRPC_Client() :
     def stopGPSPeriodicRead(self):
         self._gps_running=False
 
+    def stopGPS(self):
+        if self._streamer != None :
+            self.stopGPSStreaming()
+        else:
+            self.stopGPSPeriodicRead()
+
     def stopModemPeriodicRead(self):
         self._modem_running = False
 
@@ -138,6 +146,16 @@ class Modem_GPS_GRPC_Client() :
         if self._gps_running :
             self.armGPSTimer()
 
+    def startGPSStreaming(self,callback,rules):
+        rules_j=json.dumps(rules)
+        self._streamer=ContinuousGPSReader(self,callback,self._logger,rules_j)
+        self._streamer.start()
+
+    def stopGPSStreaming(self):
+        req=ModemCmd()
+        req.command="STOP"
+        resp=self._stub.stopStream(req)
+        self._logger.debug("Stop streaming acknowledgement:"+resp.response)
 
     @staticmethod
     def GpsMsg_ToDict(msg,attribs):
@@ -152,6 +170,32 @@ class Modem_GPS_GRPC_Client() :
         return out
 
 
+class ContinuousGPSReader(threading.Thread):
+    '''
+    this class is used to read a continuous stream of gps event
+    and throwing a call for each of them
+    '''
+    def __init__(self,client,callback,logger,rules):
+        threading.Thread.__init__(self)
+        self._client=client
+        self._callback=callback
+        self._logger=logger
+        self._rules=rules
+
+    def run(self):
+        req=ModemCmd()
+        req.command=self._rules
+        for pos in self._client._stub.streamGPS(req) :
+            if pos.fix:
+                resp=Modem_GPS_GRPC_Client.GpsMsg_ToDict(pos,Modem_GPS_GRPC_Client.v_attr)
+            else:
+                resp={}
+                resp['fix']=False
+            self._callback(resp)
+        self._logger.debug("End GPS streaming")
+        self._client._streamer=None
+
+
 
 class T():
 
@@ -162,17 +206,20 @@ class T():
             print("No fix")
 
 
+def pos_callback(pos):
+    print("Callback:",pos)
+
 def main():
 
     logger= logging.getLogger('Test-GPS')
     logging.basicConfig()
     logger.setLevel(logging.DEBUG)
-    gps=GPS_GRPC_Client("127.0.0.1:20231",logger)
+    gps=Modem_GPS_GRPC_Client("127.0.0.1:20231",logger)
     resp=gps.modem_status()
     if resp == None : return
-    if resp.response == "OK" and  resp.status.gps_on == True :
-        v= gps.gps_status()
-        print (v )
+
+    v= gps.gps_status()
+    print (v )
     '''
         if v.fix == True:
             print("LAT:",v.latitude,"LONG:",v.longitude,"SOG:",v.SOG,"COG:",v.COG)
@@ -185,6 +232,10 @@ def main():
     gps.stopPeriodicRead()
     time.sleep(15.)
     '''
+    rules={"fixtime":10,"no_fix_time":60,"distance":100}
+    gps.startGPSStreaming(pos_callback,rules)
+    time.sleep(60.)
+    gps.stopGPSStreaming()
 
 
 if __name__ == '__main__':

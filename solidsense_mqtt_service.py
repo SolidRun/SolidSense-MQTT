@@ -639,14 +639,17 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             return
 
         typeArgs = {
-            'command' : (str, ['read', 'start', 'stop','status']),
+            'command' : (str, ['read', 'start', 'stop','status','stream']),
             'period' : ( float, None),
-            'distance'  : (float, None)
+            'distance'  : (float, None) ,
+            'fix_interval' : (float,None),
+            'nofix_interval' : (float,None)
         }
 
         mandatoryArgs = [
             'command'
         ]
+
         if not self.modem_gps_on :
             # no need to do anything but reply an error
             resp=self.buildGPSresponse("gps",1,"No GPS")
@@ -672,7 +675,15 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             period=payload.get('period',60.)
             self.modem_gps_client.startGPSPeriodicRead(period,self.gpsPositionCallback)
         elif command == "stop" :
-            self.modem_gps_client.stopGPSPeriodicRead()
+            self.modem_gps_client.stopGPS()
+        elif command == 'stream' :
+            param={}
+            args=['distance','fix_interval','nofix_interval']
+            for a in args:
+                if a in payload:
+                    param[a] = payload[a]
+            self.modem_gps_client.startGPSStreaming(self.gpsPositionCallback,param)
+
 
         if resp != None or error != 0:
            r_payload=self.buildGPSresponse(command,error,resp)
