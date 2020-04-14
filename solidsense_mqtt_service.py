@@ -76,8 +76,15 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.ble_scan = settings.ble_scan
         self.modem_gps_on = settings.modem_gps
         self.gps_addr = settings.modem_gps_addr
-        self.obd= settings.obd
-        self.obd_addr=settings.obd_addr
+        self.obd=False
+        obd_dev= settings.obd_device
+        if obd_dev != None:
+            p=obd_dev.split('!')
+            if len(p) == 2 :
+                obd_service=p[0]
+                obd_dev_addr=p[1]
+                self.obd=True
+        self.obd_service_addr=settings.obd_addr
         self.modem_gps_client=None
         self.obd_client=None
 
@@ -98,19 +105,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
                 self.logger.critical("Error during BLE Service creation => gateway not operational")
                 self._ble_on=False
             # print("BLE service created")
-            if self.ble_on :
-                self.ble_service.setCallbacks(self)
 
-                # Default configuration
-                if self.ble_filters is not None :
-                    if len(self.ble_filters) > 0:
-                        self.logger.info("apply default filters configuration : " + self.ble_filters)
-                        self._filter_cmd_procesing(self.ble_filters)
-
-                if self.ble_scan is not None:
-                    if len(self.ble_scan) > 0:
-                        self.logger.info("apply default scan configuration : " + self.ble_scan)
-                        self._scan_cmd_processing(self.ble_scan)
 
         if self.modem_gps_on :
                 self.logger.info("creating the GPS client on:"+self.gps_addr)
@@ -123,10 +118,51 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
                     self.modem_gps_client=None
                 else:
                     self.logger.info("GPS service client succesfully attached")
+
+        '''
+        Attach the vehicle service and search for OBD dongle
+        '''
         if self.obd :
-                 self.obd_client=OBD_Client.OBD_GRPC_Client(self.obd_addr,self.logger)
+            if obd_service != 'ble' :
+                # only BLE for the moment
+                self.logger.critical("Service "+obd_service+" Not supported for Vehicle access")
+                self.obd=False
+            else:
+                # start the search for the dongle
+                # check if we alreday have a MAC address
+                self.logger.info("Searching for Vehicle OBD dongle:"+obd_dev_addr)
+                p=obd_dev_addr.split(':')
+                self.obd_mac=None
+                if len(p) == 6 :
+                    # that is a mac
+                    obd_mac=odb_dev_addr
+                else:
+                    # let's try to scan to get it
+                    if self.ble_on :
+                        self.ble_service.scanSynch(10.,False)
+                        self.obd_mac=self.ble_service.findDeviceByName(obd_dev_addr)
+                if self.obd_mac != None:
+                    self.obd_client=OBD_Client.OBD_GRPC_Client(self.obd_service_addr,obd_mac,self.logger)
+                else:
+                    self.logger.critical("Vehicle service device not found:"+obd_dev_addr)
+                    self.obd=False
+        '''
+        Now finalize the BLE setup
+        This has to be done after the potential search of the OBD dobngle
+        '''
+        if self.ble_on :
+            self.ble_service.setCallbacks(self)
 
+            # Default configuration
+            if self.ble_filters is not None :
+                if len(self.ble_filters) > 0:
+                    self.logger.info("apply default filters configuration : " + self.ble_filters)
+                    self._filter_cmd_procesing(self.ble_filters)
 
+            if self.ble_scan is not None:
+                if len(self.ble_scan) > 0:
+                    self.logger.info("apply default scan configuration : " + self.ble_scan)
+                    self._scan_cmd_processing(self.ble_scan)
         # self.first_connection = True
         self.logger.info("Gateway version %s started with id: %s", ble_mqtt_version, self.gw_id)
         self.mqtt_wrapper.start()
@@ -293,9 +329,9 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         else:
             return
 
-        if self.add_gps != None and self.gps_on :
+        if self.add_gps != None and self.modem_gps_on :
             # let's read the GPS
-            resp=self.gps_client.gpsVector()
+            resp=self.modem_gps_client.gpsVector()
             out['gps']=resp
 
         # Print debug informations
@@ -380,7 +416,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             'advertisement'  : (str, ['none', 'min', 'full']),
             'sub_topics'  : (bool, None),
             'adv_interval'  : ((float, int), None),
-            'gps' : (str,['position'])
+            'gps' : (str,['position','full'])
         }
 
         mandatoryArgs = [
@@ -736,6 +772,10 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         elif  payload['command'] == 'stop' :
              self.modem_gps_client.stopModemPeriodicRead()
 
+        elif payload['command']== 'operators':
+            resp=self.modem_gps_client.modem_operators()
+            self.modemStatusCallback(resp)
+
 
     # global gateway function
     def publishGatewayStatus(self):
@@ -810,10 +850,11 @@ class SolidSenseParserHelper(ParserHelper):
         )
         # OBD
         self.ms.add_argument(
-            "--obd",
-            default=False,
-            action="store_true",
-            help=("True if a OBD is to be attached to the MQTT client")
+            "--obd_device",
+            default=None,
+            action="store",
+            type=str,
+            help=("Interface used if a OBD is to be attached to the MQTT client! Prefix or MAC")
         )
         self.ms.add_argument(
             "--obd_addr",

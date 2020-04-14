@@ -31,6 +31,7 @@ class Modem_GPS_GRPC_Client() :
     v_attr=('fix','gps_time','latitude','longitude','altitude','SOG','COG')
     mf_attr=('model','IMEI','IMSI','ICCID','network_reg','PLMNID','network_name','rat','band','lac','ci','rssi')
     ms_attr=('network_reg','PLMNID','network_name','rat','band','lac','ci','rssi')
+    mo_attr=('model','IMEI','IMSI','ICCID','network_reg','PLMNID','network_name','rat','band','lac','ci','rssi','operators')
 
     def __init__(self,addr,logger) :
 
@@ -55,6 +56,20 @@ class Modem_GPS_GRPC_Client() :
         self._logger.debug("Read modem status result "+resp.response)
         if resp.response == 'OK':
             out=Modem_GPS_GRPC_Client.GpsMsg_ToDict(resp.status,Modem_GPS_GRPC_Client.mf_attr)
+            return out
+        else:
+            return None
+
+    def modem_operators(self):
+        req=ModemCmd(command='operator')
+        try:
+            resp=self._stub.modemCommand(req)
+        except grpc.RpcError as err:
+            self._logger.error(str(err))
+            return None
+        self._logger.debug("Read modem status result "+resp.response)
+        if resp.response == 'OK':
+            out=Modem_GPS_GRPC_Client.GpsMsg_ToDict(resp.status,Modem_GPS_GRPC_Client.mo_attr)
             return out
         else:
             return None
