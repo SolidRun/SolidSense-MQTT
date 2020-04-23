@@ -824,13 +824,13 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             resp=self.obd_client.connect(self.obd_mac)
             if resp == None:
                 self.logger.critical("No connection to Vehicle service")
-                self.obd_connected=False
+                # self.obd_connected=False
                 return (2,"No connection to gRPC vehicle service")
-            self.obd_connected = True
+            # self.obd_connected = True
             return (0,resp)
         else:
             self.logger.critical("Vehicle service device (dongle) not found:"+self.obd_dev_addr)
-            self.obd_connected=False
+            # self.obd_connected=False
             return (3,"OBD dongle not found")
 
     @catchall
@@ -865,29 +865,23 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
         command=payload['command']
         if command == 'connect':
-            if not self.obd_connected :
-                obd_dev=payload.get('device',None)
-                if obd_dev != None :
-                    self.obd_dev_addr =obd_dev
-                err,resp=self._obd_connect()
 
-                r_payload = self.buildOBDResponse("connect",err,resp)
+            obd_dev=payload.get('device',None)
+            if obd_dev != None :
+                self.obd_dev_addr =obd_dev
+            err,resp=self._obd_connect()
 
-                self.mqtt_wrapper.publish("vehicle_result/"+self.gw_id,r_payload)
+            r_payload = self.buildOBDResponse("connect",err,resp)
+
+            self.mqtt_wrapper.publish("vehicle_result/"+self.gw_id,r_payload)
 
         elif command == 'read':
-            if not self.obd_connected :
-                resp=self.builOBDResponse("read",3,"Vehicle service not connected")
-                self.mqtt_wrapper.publish('vehicle_result/'+self.gw_id,resp)
-            else:
-                self.obd_client.startStreaming(self.obd_callback)
+
+            self.obd_client.startStreaming(self.obd_callback)
 
         elif command == 'stop' :
-            if not self.obd_connected :
-                resp=self.builOBDResponse("read",3,"Vehicle service not connected")
-                self.mqtt_wrapper.publish('vehicle_result/'+self.gw_id,resp)
-            else:
-                self.obd_client.stopStreaming()
+
+            self.obd_client.stopStreaming()
 
 
 
@@ -973,6 +967,13 @@ class SolidSenseParserHelper(ParserHelper):
             default=False,
             action="store_true",
             help=("True if the autostart file is to be excuted /data/solidsense/mqtt/autostart"),
+        )
+
+        self.ble.add_argument (
+            "--ble_interface",
+            default=None,
+            type=str,
+            help=("List all hci interfaces that have to be managed by the BLE service")
         )
 
 

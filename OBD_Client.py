@@ -13,13 +13,14 @@ import os
 import sys
 import inspect
 
-cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../OBD_Service")))
+cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../vehicle")))
 sys.path.insert(0, cmd_subfolder)
 
 import threading
 import logging
 import time
 import grpc
+import json
 
 from OBD_Service_pb2 import *
 import OBD_Service_pb2_grpc
@@ -44,16 +45,16 @@ class OBD_GRPC_Client() :
         except grpc.RpcError as err:
             self._logger.error(str(err))
             return None
-        self._logger.debug("Connect response:"+str(resp))
+        self._logger.debug("Connect response:"+resp.error)
         out={}
         out['connected']=resp.connected
         out['engine_on']=resp.engine_on
         out['error']=resp.error
-        out['timestamp']=resp.timestamp
+        out['timestamp']=resp.obd_time
         return out
 
 
-    def startStreaming(self,callback,commmands=None,rules=None):
+    def startStreaming(self,callback,commands=None,rules=None):
         rules_j=json.dumps(rules)
         self._streamer=ContinuousOBDReader(self,callback,self._logger,commands,rules_j)
         self._streamer.start()
@@ -94,7 +95,7 @@ class ContinuousOBDReader(threading.Thread):
             out['connected']=resp.connected
             out['engine_on']=resp.engine_on
             out['error']=resp.error
-            out['timestamp']=resp.timestamp
+            out['timestamp']=resp.obd_time
             if resp.engine_on:
                 obd_cmds={}
                 for c in resp.values:
