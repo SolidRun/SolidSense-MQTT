@@ -22,8 +22,11 @@ import time
 import grpc
 import json
 
+
 from OBD_Service_pb2 import *
 import OBD_Service_pb2_grpc
+
+
 
 
 class OBD_GRPC_Client() :
@@ -91,6 +94,7 @@ class ContinuousOBDReader(threading.Thread):
         else:
             req.request=0
         for resp in self._client._stub.Read(req) :
+            self._logger.debug("OBD message received with:"+resp.error)
             out={}
             out['connected']=resp.connected
             out['engine_on']=resp.engine_on
@@ -102,10 +106,10 @@ class ContinuousOBDReader(threading.Thread):
                     cmd={}
                     cmd['type']=c.type
                     if c.type == 0 :
-                        cmd['value'] = c.value.f
+                        cmd['value'] = c.f
                         cmd['unit'] = c.unit
                     else:
-                        cmd['value']=c.value.s
+                        cmd['value']=c.s
                     obd_cmds[c.cmd]= cmd
                 out['commands']=obd_cmds
             self._callback(out)

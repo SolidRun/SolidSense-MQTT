@@ -19,10 +19,10 @@ import inspect
 cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../ble_gateway/BLE-Bluepy")))
 sys.path.insert(0, cmd_subfolder)
 
-'''
-cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../BLE-OBD")))
+
+cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../common")))
 sys.path.insert(0, cmd_subfolder)
-'''
+
 
 
 
@@ -47,6 +47,9 @@ import Modem_GPS_Client
 import OBD_Client
 from mqtt_time import *
 
+from solidsense_led import *
+from solidsense_parameters import *
+
 
 
 
@@ -65,6 +68,11 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         super().__init__()
 
         self.logger = logger or logging.getLogger(__name__)
+        self.led=SolidSenseLed.ledref(
+            SolidSenseParameters.getParam('led'))
+        if self.led != None :
+            self.led.red(255)
+            self.led.green(0)
         self.exitSem = Semaphore(0)
 
         self.gw_id = settings.gateway_id
@@ -92,7 +100,8 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             settings,
             self.logger,
             self._on_mqtt_wrapper_termination_cb,
-            self._on_connect
+            self._on_connect,
+            led=self.led
         )
 
         if self.ble_on :
@@ -129,8 +138,11 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
                 self.logger.critical("Service "+obd_service+" Not supported for Vehicle access")
                 self.obd=False
             else:
-
-                self.obd_client=OBD_Client.OBD_GRPC_Client(self.obd_service_addr,self.logger)
+                try:
+                    self.obd_client=OBD_Client.OBD_GRPC_Client(self.obd_service_addr,self.logger)
+                except ImportError as err:
+                    self.logger.error("Error on Vehicle module => disabled")
+                    self.obd=False
 
         '''
         Now finalize the BLE setup
@@ -192,6 +204,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.mqtt_wrapper.subscribe("solidsense/"+self.gw_id,self._solidsense_cmd_received)
 
         self.logger.info("******* SolidSense gateway ready *********")
+
         self.publishGatewayStatus()
 
 
@@ -227,7 +240,14 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
     def run(self):
         # Nothing to do on the main thread - Just wait the end of the MQTT connection
-        self.exitSem.acquire()
+        try:
+            self.exitSem.acquire()
+        except KeyboardInterrupt :
+            self.logger.info("Service interrupted by user")
+            self.led.off()
+        except Exception as e :
+            self.led.off()
+            print(e)
 
 
 
@@ -265,7 +285,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.mqtt_wrapper.publish(topic,json.dumps(payload))
 
     def advertisementCallback(self, dev):
-        self.logger.info("Advertisement Callback received for:" + str(dev.name()))
+        self.logger.debug("Advertisement Callback received for:" + str(dev.name()))
 
 
         if self.sub_topics :
@@ -311,7 +331,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
 
     def scanEndCallback(self, service):
-        self.logger.info("Scan finished")
+        self.logger.info("BLE Scan finished")
         out = {}
 
         if self.scanResult == 'summary':
@@ -907,7 +927,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             "filter":self._filter_cmd_procesing,
             "modem":self._modem_cmd_processing,
             "gps":self._gps_cmd_processing,
-            "obd":self._obd_cmd_processing
+            "vehicle":self._obd_cmd_processing
             }
         self.logger.info("Applying autostart commands")
         try:
@@ -922,9 +942,9 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             if idx == -1 :
                 self.logger.error("Autostart error on line:"+line)
                 continue
-            topic=line[:idx]
+            topic=line[:idx].lower()
             cmd=line[idx+1:]
-            self.logger.info("Applying autostart command on: "+topic+' paylaod:'+cmd)
+            self.logger.info("Applying autostart command on: "+topic+' payload:'+cmd)
             try:
                 autostart_table[topic](topic,cmd)
             except KeyError :
@@ -1027,6 +1047,10 @@ def main():
 
     global _logger
 
+    default= {
+        "led": 2
+        }
+
     parse = SolidSenseParserHelper(
         description="SolidSense MQTT service arguments",
     )
@@ -1036,15 +1060,15 @@ def main():
     if settings.gateway_id is None:
         settings.gateway_id = socket.gethostname()
 
-
+    param=SolidSenseParameters('mqtt',default)
 
     log = LoggerHelper(module_name="SolidSense-MQTT", level='error')
     _logger = log.setup()
-    BLE_Client.BLE_init_parameters()
+    BLE_Client.BLE_Init_Service(log.getHandler('stdout'))
     # Set debug level
     _logger.setLevel(logging.DEBUG)
     # Override BLE_CLient logger to get logs with the same format
-    BLE_Client.blelog = _logger
+    # BLE_Client.blelog = _logger
 
     _check_parameters(settings, _logger)
 
