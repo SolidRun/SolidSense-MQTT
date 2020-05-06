@@ -19,10 +19,10 @@ import inspect
 cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../ble_gateway/BLE-Bluepy")))
 sys.path.insert(0, cmd_subfolder)
 
-'''
-cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../BLE-OBD")))
+
+cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0], "../common")))
 sys.path.insert(0, cmd_subfolder)
-'''
+
 
 
 
@@ -47,6 +47,9 @@ import Modem_GPS_Client
 import OBD_Client
 from mqtt_time import *
 
+from solidsense_led import *
+from solidsense_parameters import *
+
 
 
 
@@ -65,6 +68,11 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         super().__init__()
 
         self.logger = logger or logging.getLogger(__name__)
+        self.led=SolidSenseLed.ledref(
+            SolidSenseParameters.getParam('led'))
+        if self.led != None :
+            self.led.red(255)
+            self.led.green(0)
         self.exitSem = Semaphore(0)
 
         self.gw_id = settings.gateway_id
@@ -72,12 +80,19 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.gw_version = settings.gateway_version
 
         self.ble_on = settings.ble
-        self.ble_filters = settings.ble_filters
-        self.ble_scan = settings.ble_scan
+        # self.ble_filters = settings.ble_filters
+        # self.ble_scan = settings.ble_scan
         self.modem_gps_on = settings.modem_gps
         self.gps_addr = settings.modem_gps_addr
-        self.obd= settings.obd
-        self.obd_addr=settings.obd_addr
+        self.obd=False
+        obd_dev= settings.obd_device
+        if obd_dev != None:
+            p=obd_dev.split('!')
+            if len(p) == 2 :
+                obd_service=p[0]
+                self.obd_dev_addr=p[1]
+                self.obd=True
+        self.obd_service_addr=settings.obd_addr
         self.modem_gps_client=None
         self.obd_client=None
 
@@ -85,7 +100,8 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             settings,
             self.logger,
             self._on_mqtt_wrapper_termination_cb,
-            self._on_connect
+            self._on_connect,
+            led=self.led
         )
 
         if self.ble_on :
@@ -98,19 +114,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
                 self.logger.critical("Error during BLE Service creation => gateway not operational")
                 self._ble_on=False
             # print("BLE service created")
-            if self.ble_on :
-                self.ble_service.setCallbacks(self)
 
-                # Default configuration
-                if self.ble_filters is not None :
-                    if len(self.ble_filters) > 0:
-                        self.logger.info("apply default filters configuration : " + self.ble_filters)
-                        self._filter_cmd_procesing(self.ble_filters)
-
-                if self.ble_scan is not None:
-                    if len(self.ble_scan) > 0:
-                        self.logger.info("apply default scan configuration : " + self.ble_scan)
-                        self._scan_cmd_processing(self.ble_scan)
 
         if self.modem_gps_on :
                 self.logger.info("creating the GPS client on:"+self.gps_addr)
@@ -123,11 +127,48 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
                     self.modem_gps_client=None
                 else:
                     self.logger.info("GPS service client succesfully attached")
+
+        '''
+        Attach the vehicle service and search for OBD dongle
+        '''
         if self.obd :
-                 self.obd_client=OBD_Client.OBD_GRPC_Client(self.obd_addr,self.logger)
+            self.obd_connected=False
+            if obd_service != 'ble' :
+                # only BLE for the moment
+                self.logger.critical("Service "+obd_service+" Not supported for Vehicle access")
+                self.obd=False
+            else:
+                try:
+                    self.obd_client=OBD_Client.OBD_GRPC_Client(self.obd_service_addr,self.logger)
+                except ImportError as err:
+                    self.logger.error("Error on Vehicle module => disabled")
+                    self.obd=False
 
+        '''
+        Now finalize the BLE setup
+        This has to be done after the potential search of the OBD dobngle
+        '''
+        if self.ble_on :
+            self.ble_service.setCallbacks(self)
 
-        # self.first_connection = True
+            # Default configuration
+            '''
+            Now done via autostart
+
+            if self.ble_filters is not None :
+                if len(self.ble_filters) > 0:
+                    self.logger.info("apply default filters configuration : " + self.ble_filters)
+                    self._filter_cmd_procesing(self.ble_filters)
+
+            if self.ble_scan is not None:
+                if len(self.ble_scan) > 0:
+                    self.logger.info("apply default scan configuration : " + self.ble_scan)
+                    self._scan_cmd_processing(self.ble_scan)
+            '''
+        # if autostart enabled go for it
+        if settings.autostart :
+            self.autostart()
+
         self.logger.info("Gateway version %s started with id: %s", ble_mqtt_version, self.gw_id)
         self.mqtt_wrapper.start()
 
@@ -163,6 +204,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.mqtt_wrapper.subscribe("solidsense/"+self.gw_id,self._solidsense_cmd_received)
 
         self.logger.info("******* SolidSense gateway ready *********")
+
         self.publishGatewayStatus()
 
 
@@ -198,7 +240,14 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
     def run(self):
         # Nothing to do on the main thread - Just wait the end of the MQTT connection
-        self.exitSem.acquire()
+        try:
+            self.exitSem.acquire()
+        except KeyboardInterrupt :
+            self.logger.info("Service interrupted by user")
+            self.led.off()
+        except Exception as e :
+            self.led.off()
+            print(e)
 
 
 
@@ -236,7 +285,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.mqtt_wrapper.publish(topic,json.dumps(payload))
 
     def advertisementCallback(self, dev):
-        self.logger.info("Advertisement Callback received for:" + str(dev.name()))
+        self.logger.debug("Advertisement Callback received for:" + str(dev.name()))
 
 
         if self.sub_topics :
@@ -282,7 +331,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
 
     def scanEndCallback(self, service):
-        self.logger.info("Scan finished")
+        self.logger.info("BLE Scan finished")
         out = {}
 
         if self.scanResult == 'summary':
@@ -293,9 +342,9 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         else:
             return
 
-        if self.add_gps != None and self.gps_on :
+        if self.add_gps != None and self.modem_gps_on :
             # let's read the GPS
-            resp=self.gps_client.gpsVector()
+            resp=self.modem_gps_client.gpsVector()
             out['gps']=resp
 
         # Print debug informations
@@ -333,12 +382,12 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
     def _scan_cmd_received(self, client, userdata, message):
         payload = message.payload.decode("utf-8")
         self.logger.info("scan request : " + payload)
-        self._scan_cmd_processing(payload)
+        self._scan_cmd_processing(message.topic,payload)
 
     def _filter_cmd_received(self, client, userdata, message):
         payload = message.payload.decode("utf-8")
         self.logger.info("filter request : " + payload)
-        self._filter_cmd_procesing(payload)
+        self._filter_cmd_procesing(message.topic,payload)
 
     def _gatt_cmd_received(self, client, userdata, message):
         payload = message.payload.decode("utf-8")
@@ -360,11 +409,16 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.logger.info("solidsense request : " + message.topic+" : "+payload)
         self._solidsense_cmd_processing(message.topic,payload)
 
+    def _obd_cmd_received(self,client,userdata,message):
+        payload = message.payload.decode("utf-8")
+        self.logger.info("vehicle request : " + message.topic+" : "+payload)
+        self._obd_cmd_processing(message.topic,payload)
+
     ####################################################################
     # JSON Processing
 
     @catchall
-    def _scan_cmd_processing(self, message):
+    def _scan_cmd_processing(self, topic, message):
         try:
             payload = json.loads(message)
 
@@ -380,7 +434,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             'advertisement'  : (str, ['none', 'min', 'full']),
             'sub_topics'  : (bool, None),
             'adv_interval'  : ((float, int), None),
-            'gps' : (str,['position'])
+            'gps' : (str,['position','full'])
         }
 
         mandatoryArgs = [
@@ -422,7 +476,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
 
     @catchall
-    def _filter_cmd_procesing(self, message):
+    def _filter_cmd_procesing(self, topic, message):
         try:
             payload = json.loads(message)
 
@@ -639,14 +693,17 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             return
 
         typeArgs = {
-            'command' : (str, ['read', 'start', 'stop','status']),
+            'command' : (str, ['read', 'start', 'stop','status','stream']),
             'period' : ( float, None),
-            'distance'  : (float, None)
+            'distance'  : (float, None) ,
+            'fix_interval' : (float,None),
+            'nofix_interval' : (float,None)
         }
 
         mandatoryArgs = [
             'command'
         ]
+
         if not self.modem_gps_on :
             # no need to do anything but reply an error
             resp=self.buildGPSresponse("gps",1,"No GPS")
@@ -672,7 +729,15 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             period=payload.get('period',60.)
             self.modem_gps_client.startGPSPeriodicRead(period,self.gpsPositionCallback)
         elif command == "stop" :
-            self.modem_gps_client.stopGPSPeriodicRead()
+            self.modem_gps_client.stopGPS()
+        elif command == 'stream' :
+            param={}
+            args=['distance','fix_interval','nofix_interval']
+            for a in args:
+                if a in payload:
+                    param[a] = payload[a]
+            self.modem_gps_client.startGPSStreaming(self.gpsPositionCallback,param)
+
 
         if resp != None or error != 0:
            r_payload=self.buildGPSresponse(command,error,resp)
@@ -691,6 +756,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
         return json.dumps(out)
 
+    @catchall
     def _modem_cmd_processing(self,topic,message):
 
         try:
@@ -708,10 +774,15 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         mandatoryArgs = [
             'command'
         ]
+
         if not self.modem_gps_on :
             # no need to do anything but reply an error
             resp=self.buildGPSresponse("modem",1,"No Modem")
             self.mqtt_wrapper.publish("modem_result/"+self.gw_id,resp)
+            return
+
+        if self._checkBadParams(payload, typeArgs, mandatoryArgs):
+            self.logger.error("Abort Modem request")
             return
 
         if payload['command'] == 'status' :
@@ -724,6 +795,115 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
         elif  payload['command'] == 'stop' :
              self.modem_gps_client.stopModemPeriodicRead()
+
+        elif payload['command']== 'operators':
+            resp=self.modem_gps_client.modem_operators()
+            self.modemStatusCallback(resp)
+
+##################################################################################
+#
+#   Vehicle service section methods
+#
+##################################################################################
+
+    def buildOBDResponse(self,command,error,result):
+        out = {}
+        out['command'] = command
+        out['error'] = error
+        out['timestamp'] = MQTT_Timestamp.now()
+
+        if error == 0 and result != None:
+            out['result'] = result
+        elif result != None :
+            out['message']=result
+
+        return json.dumps(out)
+
+
+    def obd_callback(self,result):
+        payload=self.buildGPSresponse('read',0,result)
+        self.logger.debug("Publish OBD results "+str(result))
+        self.mqtt_wrapper.publish('vehicle_result/'+self.gw_id,payload)
+
+
+    def _obd_connect(self):
+        # start the search for the dongle
+        # check if we alreday have a MAC address
+        self.logger.info("Searching for Vehicle OBD dongle:"+self.obd_dev_addr)
+        p=self.obd_dev_addr.split(':')
+        self.obd_mac=None
+        if len(p) == 6 :
+            # that is a mac
+            self.obd_mac=self.obd_dev_addr
+        else:
+            # let's try to scan to get it
+            if self.ble_on :
+                self.ble_service.scanSynch(10.,False,inhibitFlag=True)
+                self.obd_mac=self.ble_service.findDeviceByName(self.obd_dev_addr)
+        if self.obd_mac != None:
+            resp=self.obd_client.connect(self.obd_mac)
+            if resp == None:
+                self.logger.critical("No connection to Vehicle service")
+                # self.obd_connected=False
+                return (2,"No connection to gRPC vehicle service")
+            # self.obd_connected = True
+            return (0,resp)
+        else:
+            self.logger.critical("Vehicle service device (dongle) not found:"+self.obd_dev_addr)
+            # self.obd_connected=False
+            return (3,"OBD dongle not found")
+
+    @catchall
+    def _obd_cmd_processing(self,topic,message):
+        try:
+            payload = json.loads(message)
+
+        except ValueError as e:
+            self.logger.error("Bad modem request ->" + str(e))
+            return
+
+        typeArgs = {
+            'command' : (str, ['connect', 'read','stop']),
+            'device' : (str,None)  ,
+            'on_period' : ( float, None),
+            'off_period' : (float, None),
+            'obd_commands' :(list, None)
+        }
+
+        mandatoryArgs = [
+            'command'
+        ]
+
+        if not self.obd :
+            resp=self.buildOBDResponse("vehicle",1,"No Vehicle service")
+            self.mqtt_wrapper.publish('vehicle_result/'+self.gw_id,resp)
+            return
+
+        if self._checkBadParams(payload, typeArgs, mandatoryArgs):
+            self.logger.error("Abort Vehicle request")
+            return
+
+        command=payload['command']
+        if command == 'connect':
+
+            obd_dev=payload.get('device',None)
+            if obd_dev != None :
+                self.obd_dev_addr =obd_dev
+            err,resp=self._obd_connect()
+
+            r_payload = self.buildOBDResponse("connect",err,resp)
+
+            self.mqtt_wrapper.publish("vehicle_result/"+self.gw_id,r_payload)
+
+        elif command == 'read':
+
+            self.obd_client.startStreaming(self.obd_callback)
+
+        elif command == 'stop' :
+
+            self.obd_client.stopStreaming()
+
+
 
 
     # global gateway function
@@ -738,6 +918,39 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.logger.debug("Publish global gateway status")
         self.mqtt_wrapper.publish('solidsense_resp/'+self.gw_id,json.dumps(out))
 
+#
+#    Autostart function
+#
+    def autostart(self):
+        autostart_table= {
+            "scan":self._scan_cmd_processing,
+            "filter":self._filter_cmd_procesing,
+            "modem":self._modem_cmd_processing,
+            "gps":self._gps_cmd_processing,
+            "vehicle":self._obd_cmd_processing
+            }
+        self.logger.info("Applying autostart commands")
+        try:
+            fd=open("/data/solidsense/mqtt/autostart","r")
+        except IOError as err:
+            self.logger.error("Error on autostart file "+str(err))
+            return
+
+        for line in fd:
+            if line[0] == '#': continue
+            idx=line.find(':')
+            if idx == -1 :
+                self.logger.error("Autostart error on line:"+line)
+                continue
+            topic=line[:idx].lower()
+            cmd=line[idx+1:]
+            self.logger.info("Applying autostart command on: "+topic+' payload:'+cmd)
+            try:
+                autostart_table[topic](topic,cmd)
+            except KeyError :
+                self.logger.error("autostart wrong topic: "+topic)
+        fd.close()
+        self.logger.info("End of autostart")
 
 
 ####################################################################
@@ -770,16 +983,19 @@ class SolidSenseParserHelper(ParserHelper):
         )
 
         self.ble.add_argument(
-            "--ble_filters",
-            default=None,
-            help=("The list of filters that will be enabled at the service startup, in the JSON format"),
+            "--autostart",
+            default=False,
+            action="store_true",
+            help=("True if the autostart file is to be excuted /data/solidsense/mqtt/autostart"),
         )
 
-        self.ble.add_argument(
-            "--ble_scan",
+        self.ble.add_argument (
+            "--ble_interface",
             default=None,
-            help=("The scan command that will be executed at the service startup, in the JSON format"),
+            type=str,
+            help=("List all hci interfaces that have to be managed by the BLE service")
         )
+
 
     def add_ms_config(self):
         # configuration of micro service
@@ -799,10 +1015,11 @@ class SolidSenseParserHelper(ParserHelper):
         )
         # OBD
         self.ms.add_argument(
-            "--obd",
-            default=False,
-            action="store_true",
-            help=("True if a OBD is to be attached to the MQTT client")
+            "--obd_device",
+            default=None,
+            action="store",
+            type=str,
+            help=("Interface used if a OBD is to be attached to the MQTT client! Prefix or MAC")
         )
         self.ms.add_argument(
             "--obd_addr",
@@ -830,6 +1047,10 @@ def main():
 
     global _logger
 
+    default= {
+        "led": 2
+        }
+
     parse = SolidSenseParserHelper(
         description="SolidSense MQTT service arguments",
     )
@@ -839,15 +1060,15 @@ def main():
     if settings.gateway_id is None:
         settings.gateway_id = socket.gethostname()
 
-
+    param=SolidSenseParameters('mqtt',default)
 
     log = LoggerHelper(module_name="SolidSense-MQTT", level='error')
     _logger = log.setup()
-    BLE_Client.BLE_init_parameters()
+    BLE_Client.BLE_Init_Service(log.getHandler('stdout'))
     # Set debug level
     _logger.setLevel(logging.DEBUG)
     # Override BLE_CLient logger to get logs with the same format
-    BLE_Client.blelog = _logger
+    # BLE_Client.blelog = _logger
 
     _check_parameters(settings, _logger)
 

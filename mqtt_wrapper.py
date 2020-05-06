@@ -33,6 +33,7 @@ class MQTTWrapper(Thread):
         on_connect_cb=None,
         last_will_topic=None,
         last_will_data=None,
+        led=None
     ):
         Thread.__init__(self)
         self.daemon = True
@@ -40,7 +41,7 @@ class MQTTWrapper(Thread):
         self.logger = logger
         self.on_termination_cb = on_termination_cb
         self.on_connect_cb = on_connect_cb
-
+        self._led=led
         self._client = mqtt.Client(client_id=settings.gateway_id)
         if not settings.mqtt_force_unsecure:
             try:
@@ -83,6 +84,16 @@ class MQTTWrapper(Thread):
         self.running = False
         self.connected = False
 
+    def led_green(self):
+        if self._led != None :
+            self._led.red(0)
+            self._led.green(255)
+
+    def led_red(self):
+        if self._led != None :
+            self._led.green(0)
+            self._led.red(255)
+
     def _on_connect(self, client, userdata, flags, rc):
         # pylint: disable=unused-argument
         if rc != 0:
@@ -91,6 +102,8 @@ class MQTTWrapper(Thread):
             return
 
         self.connected = True
+        self.led_green()
+
         if self.on_connect_cb is not None:
             self.on_connect_cb()
 
@@ -142,6 +155,8 @@ class MQTTWrapper(Thread):
             return sock
 
         self.logger.error("MQTT, unexpected disconnection")
+
+        self.led_red()
 
         if not self.connected:
             self.logger.error("Impossible to connect - authentication failure ?")

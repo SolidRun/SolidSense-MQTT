@@ -130,6 +130,9 @@ class LoggerHelper:
 
         setattr(logging.Logger, debug_level_name, cb)
 
+    def getHandler(self,handler):
+        return self._handlers[handler]
+
     def close(self):
         """ Attempts to close log handlers """
         for _, handler in self._handlers.items():
