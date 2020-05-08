@@ -207,7 +207,7 @@ class ContinuousGPSReader(threading.Thread):
                 resp={}
                 resp['fix']=False
             self._callback(resp)
-        self._logger.debug("End GPS streaming")
+        self._logger.info("End GPS streaming")
         self._client._streamer=None
 
 
