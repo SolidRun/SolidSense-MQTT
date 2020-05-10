@@ -929,7 +929,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
                 rules['on_period'] =payload.get('on_period')
                 rules['off_period']=payload.get('off_period')
                 if not self.obd_client.startStreaming(self.obd_callback,commands=obd_commands,rules=rules) :
-                    self.obd_callback.killStreamer()
+                    self.obd_client.killStreamer()
 
 
 
