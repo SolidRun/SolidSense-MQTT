@@ -37,6 +37,29 @@ class OBD_GRPC_Client() :
         self._logger.debug("creating grpc channel on:"+addr)
         self._channel= grpc.insecure_channel(addr)
         self._stub= OBD_Service_pb2_grpc.OBD_ServiceStub(self._channel)
+        self._streamer=None
+
+
+    def status(self,option="min"):
+        self._logger.info("Vehicle service send status request with option:"+option)
+        req=OBD_StatusRequest()
+        req.request=option
+        try:
+            resp=self._stub.Status(req)
+        except grpc.RpcError as err:
+            self._logger.error(str(err))
+            return None
+        out={}
+        out['connected']=resp.connected
+        out['engine_on']=resp.engine_on
+        out['autoconnect']=resp.autoconnect
+        out['MAC']=resp.MAC
+        if resp.connected :
+            out['protocol']=resp.protocol
+            out['state']=resp.state
+            if option != 'min' :
+                out['commands']=resp.commands
+        return out
 
 
     def connect(self,mac):
@@ -58,16 +81,31 @@ class OBD_GRPC_Client() :
 
 
     def startStreaming(self,callback,commands=None,rules=None):
+        if self._streamer != None :
+            self._logger.info("OBD Streaming request on-going = New request rejected")
+            return False
         rules_j=json.dumps(rules)
         self._streamer=ContinuousOBDReader(self,callback,self._logger,commands,rules_j)
         self._streamer.start()
+        return True
 
     def stopStreaming(self):
         if self._streamer == None :
             return
         req=OBD_cmd()
         resp=self._stub.Stop(req)
-        self._logger.debug("Stop vehicle streaming acknowledgement:"+resp.response)
+        self._logger.debug("Stop vehicle streaming acknowledgement OBD connected:"+str(resp.connected))
+
+    def killStreamer(self):
+        if self._streamer == None :
+            return
+        self._logger.debug("Killing OBD streaming thread")
+        if not self._streamer.is_alive() :
+            self.debug("OBD streamer already stopped")
+            self._streamer = None
+            return
+
+
 
 
 
@@ -93,28 +131,32 @@ class ContinuousOBDReader(threading.Thread):
             req.request=1
         else:
             req.request=0
-        for resp in self._client._stub.Read(req) :
-            self._logger.debug("OBD message received with:"+resp.error)
-            out={}
-            out['connected']=resp.connected
-            out['engine_on']=resp.engine_on
-            out['error']=resp.error
-            out['timestamp']=resp.obd_time
-            if resp.engine_on:
-                obd_cmds={}
-                for c in resp.values:
-                    cmd={}
-                    cmd['type']=c.type
-                    if c.type == 0 :
-                        cmd['value'] = c.f
-                        cmd['unit'] = c.unit
-                    else:
-                        cmd['value']=c.s
-                    obd_cmds[c.cmd]= cmd
-                out['commands']=obd_cmds
-            self._callback(out)
+        try:
+            for resp in self._client._stub.Read(req) :
+                self._logger.debug("OBD message received with:"+resp.error)
+                out={}
+                out['connected']=resp.connected
+                out['engine_on']=resp.engine_on
+                out['error']=resp.error
+                out['timestamp']=resp.obd_time
+                if resp.engine_on:
+                    obd_cmds={}
+                    for c in resp.values:
+                        cmd={}
+                        cmd['type']=c.type
+                        if c.type == 0 :
+                            cmd['value'] = c.f
+                            cmd['unit'] = c.unit
+                        else:
+                            cmd['value']=c.s
+                        obd_cmds[c.cmd]= cmd
+                    out['commands']=obd_cmds
+                self._callback(out)
+        except Exception as err:
+            self._logger.error(str(err))
+            pass
 
-        self._logger.debug("End Vehicle OBD streaming")
+        self._logger.info("End Vehicle OBD streaming")
         self._client._streamer=None
 
 def main():
