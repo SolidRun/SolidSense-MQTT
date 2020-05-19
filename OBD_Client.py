@@ -22,9 +22,11 @@ import time
 import grpc
 import json
 
-
-from OBD_Service_pb2 import *
-import OBD_Service_pb2_grpc
+try:
+    from OBD_Service_pb2 import *
+    import OBD_Service_pb2_grpc
+except ImportError :
+    print("No vehicle OBD service Software present")
 
 
 
@@ -80,12 +82,12 @@ class OBD_GRPC_Client() :
         return out
 
 
-    def startStreaming(self,callback,commands=None,rules=None):
+    def startStreaming(self,callback,end_callback,commands=None,rules=None):
         if self._streamer != None :
             self._logger.info("OBD Streaming request on-going = New request rejected")
             return False
         rules_j=json.dumps(rules)
-        self._streamer=ContinuousOBDReader(self,callback,self._logger,commands,rules_j)
+        self._streamer=ContinuousOBDReader(self,callback,end_callback,self._logger,commands,rules_j)
         self._streamer.start()
         return True
 
@@ -114,10 +116,11 @@ class ContinuousOBDReader(threading.Thread):
     this class is used to read a continuous stream of gps event
     and throwing a call for each of them
     '''
-    def __init__(self,client,callback,logger,commands=None,rules=None):
+    def __init__(self,client,callback,end_calback,logger,commands=None,rules=None):
         threading.Thread.__init__(self)
         self._client=client
         self._callback=callback
+        self._end_callback=end_calback
         self._logger=logger
         self._rules=rules
         self._commands=commands
@@ -131,6 +134,7 @@ class ContinuousOBDReader(threading.Thread):
             req.request=1
         else:
             req.request=0
+        err=None
         try:
             for resp in self._client._stub.Read(req) :
                 self._logger.debug("OBD message received with:"+resp.error)
@@ -157,6 +161,7 @@ class ContinuousOBDReader(threading.Thread):
             pass
 
         self._logger.info("End Vehicle OBD streaming")
+        self._end_callback(err)
         self._client._streamer=None
 
 def main():

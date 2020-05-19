@@ -143,11 +143,13 @@ class Modem_GPS_GRPC_Client() :
             resp=self._stub.modemCommand(req)
         except grpc.RpcError as err:
             self._logger.error(str(err))
-            self._modem_running=False
-            return
-        if resp.response == 'OK' :
-           out=Modem_GPS_GRPC_Client.GpsMsg_ToDict(resp.status,Modem_GPS_GRPC_Client.ms_attr)
-           self._modem_callback(out)
+            # error here we shall not stop the periodic reading
+            # self._modem_running=False
+            # return
+        else:
+            if resp.response == 'OK' :
+               out=Modem_GPS_GRPC_Client.GpsMsg_ToDict(resp.status,Modem_GPS_GRPC_Client.ms_attr)
+               self._modem_callback(out)
         if self._modem_running :
             self.armModemTimer()
 
@@ -161,9 +163,9 @@ class Modem_GPS_GRPC_Client() :
         if self._gps_running :
             self.armGPSTimer()
 
-    def startGPSStreaming(self,callback,rules):
+    def startGPSStreaming(self,callback,end_callback,rules):
         rules_j=json.dumps(rules)
-        self._streamer=ContinuousGPSReader(self,callback,self._logger,rules_j)
+        self._streamer=ContinuousGPSReader(self,callback,end_callback,self._logger,rules_j)
         self._streamer.start()
 
     def stopGPSStreaming(self):
@@ -190,25 +192,36 @@ class ContinuousGPSReader(threading.Thread):
     this class is used to read a continuous stream of gps event
     and throwing a call for each of them
     '''
-    def __init__(self,client,callback,logger,rules):
+    def __init__(self,client,callback,end_callback,logger,rules):
         threading.Thread.__init__(self)
         self._client=client
         self._callback=callback
+        self._end_callback=end_callback
         self._logger=logger
         self._rules=rules
 
     def run(self):
         req=ModemCmd()
         req.command=self._rules
-        for pos in self._client._stub.streamGPS(req) :
-            if pos.fix:
-                resp=Modem_GPS_GRPC_Client.GpsMsg_ToDict(pos,Modem_GPS_GRPC_Client.v_attr)
-            else:
-                resp={}
-                resp['fix']=False
-            self._callback(resp)
-        self._logger.info("End GPS streaming")
+        error=None
+        try:
+            for pos in self._client._stub.streamGPS(req) :
+                if pos.fix:
+                    resp=Modem_GPS_GRPC_Client.GpsMsg_ToDict(pos,Modem_GPS_GRPC_Client.v_attr)
+                else:
+                    resp={}
+                    resp['fix']=False
+                self._callback(resp)
+        except Exception as err:
+            self._logger.error("Error in GPS streaming:"+str(err))
+            error=err
+            pass
+
         self._client._streamer=None
+        self._logger.info("End GPS streaming")
+        self._end_callback(error)
+        # self._logger.info("After end callback")
+
 
 
 

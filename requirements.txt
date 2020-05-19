@@ -1,0 +1,10 @@
+# pyserial
+pyserial=3.4
+
+# grpc
+grpcio=1.22.0
+protobuf=3.9.0
+PyYAML==5.1.1
+
+# mqtt
+paho-mqtt==1.4.0
