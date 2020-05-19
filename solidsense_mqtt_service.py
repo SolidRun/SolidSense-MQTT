@@ -132,6 +132,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         Attach the vehicle service and search for OBD dongle
         '''
         if self.obd :
+            self.logger.info("Attaching the vehicle service on:"+obd_service)
             self.obd_connected=False
             if obd_service != 'ble' :
                 # only BLE for the moment
@@ -140,7 +141,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             else:
                 try:
                     self.obd_client=OBD_Client.OBD_GRPC_Client(self.obd_service_addr,self.logger)
-                except ImportError as err:
+                except NameError as err:
                     self.logger.error("Error on Vehicle module => disabled")
                     self.obd=False
 
@@ -683,6 +684,15 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.logger.info("Publish Modem status ")
         self.mqtt_wrapper.publish('modem_result/'+self.gw_id,payload)
 
+    def gpsEndStreamingCallback(self,errExcept):
+        # self.logger.info("End Streaming callback")
+        if errExcept != None :
+            payload=self.buildGPSresponse('streaming_end',5,str(errExcept))
+        else:
+            payload=self.buildGPSresponse('streaming_end',0, None)
+        self.logger.info("Publish GPS end streaming")
+        self.mqtt_wrapper.publish('gps_result/'+self.gw_id,payload)
+
     @catchall
     def _gps_cmd_processing(self, topic, message) :
 
@@ -738,7 +748,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             for a in args:
                 if a in payload:
                     param[a] = payload[a]
-            self.modem_gps_client.startGPSStreaming(self.gpsPositionCallback,param)
+            self.modem_gps_client.startGPSStreaming(self.gpsPositionCallback,self.gpsEndStreamingCallback,param)
 
 
         if resp != None or error != 0:
@@ -813,18 +823,26 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         out['command'] = command
         out['error'] = error
         out['timestamp'] = MQTT_Timestamp.now()
-
-        if error == 0 and result != None:
+        if result == None : result=""
+        if error == 0 :
             out['result'] = result
-        elif result != None :
+        else:
             out['message']=result
 
         return json.dumps(out)
 
 
     def obd_callback(self,result):
-        payload=self.buildGPSresponse('read',0,result)
+        payload=self.buildOBDResponse('read',0,result)
         self.logger.info("Publish OBD results ")
+        self.mqtt_wrapper.publish('vehicle_result/'+self.gw_id,payload)
+
+    def obd_end_callback(self,errExcept):
+        if errExcept != None:
+            payload=self.buildOBDResponse('read_end',5,str(errExcept))
+        else:
+            payload=self.buildOBDResponse('read_end',0,None)
+        self.logger.info("Publish OBD end reading ")
         self.mqtt_wrapper.publish('vehicle_result/'+self.gw_id,payload)
 
 
@@ -928,7 +946,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
                 rules={}
                 rules['on_period'] =payload.get('on_period')
                 rules['off_period']=payload.get('off_period')
-                if not self.obd_client.startStreaming(self.obd_callback,commands=obd_commands,rules=rules) :
+                if not self.obd_client.startStreaming(self.obd_callback,self.obd_end_callback,commands=obd_commands,rules=rules) :
                     self.obd_client.killStreamer()
 
 
