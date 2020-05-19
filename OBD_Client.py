@@ -103,7 +103,7 @@ class OBD_GRPC_Client() :
             return
         self._logger.debug("Killing OBD streaming thread")
         if not self._streamer.is_alive() :
-            self.debug("OBD streamer already stopped")
+            self._logger.debug("OBD streamer already stopped")
             self._streamer = None
             return
 
@@ -160,9 +160,10 @@ class ContinuousOBDReader(threading.Thread):
             self._logger.error(str(err))
             pass
 
+        self._client._streamer=None
         self._logger.info("End Vehicle OBD streaming")
         self._end_callback(err)
-        self._client._streamer=None
+        self._logger.info("End Vehicle OBD streaming callback successful")
 
 def main():
     pass

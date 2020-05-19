@@ -823,25 +823,25 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         out['command'] = command
         out['error'] = error
         out['timestamp'] = MQTT_Timestamp.now()
-
-        if error == 0 and result != None:
+        if result == None : result=""
+        if error == 0 :
             out['result'] = result
-        elif result != None :
+        else:
             out['message']=result
 
         return json.dumps(out)
 
 
     def obd_callback(self,result):
-        payload=self.buildGPSresponse('read',0,result)
+        payload=self.buildOBDResponse('read',0,result)
         self.logger.info("Publish OBD results ")
         self.mqtt_wrapper.publish('vehicle_result/'+self.gw_id,payload)
 
     def obd_end_callback(self,errExcept):
         if errExcept != None:
-            payload=self.buildGPSresponse('read_end',5,str(errExcept))
+            payload=self.buildOBDResponse('read_end',5,str(errExcept))
         else:
-            payload=self.buildGPSresponse('read_end',0,None)
+            payload=self.buildOBDResponse('read_end',0,None)
         self.logger.info("Publish OBD end reading ")
         self.mqtt_wrapper.publish('vehicle_result/'+self.gw_id,payload)
 
