@@ -287,7 +287,7 @@ class ParserHelper:
             default="iso",
             action="store",
             type=str,
-            help=("Format of the time stap to be used in messages published by the gatreway"),
+            help=("Format of the time stap to be used in messages published by the gateway"),
         )
 
     @staticmethod
