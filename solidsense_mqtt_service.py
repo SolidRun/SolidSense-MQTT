@@ -961,9 +961,15 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
 
 
 
-
+    #
+    #    Global gateway MQTT command
+    ###############################################################
+    @catchall
+    def _solidsense_cmd_processing(self,topic,message):
+        self.publishGatewayStatus()
 
     # global gateway function
+    
     def publishGatewayStatus(self):
         out={}
         serv=[]
@@ -1117,6 +1123,8 @@ def main():
     settings = parse.settings()
     if settings.gateway_id is None:
         settings.gateway_id = socket.gethostname()
+        
+    # if settings.mqtt_
 
     param=SolidSenseParameters('mqtt',default)
 
