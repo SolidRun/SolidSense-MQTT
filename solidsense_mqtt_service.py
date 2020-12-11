@@ -53,7 +53,7 @@ from solidsense_parameters import *
 
 
 
-ble_mqtt_version="2.0.0"
+ble_mqtt_version="2.0.1"
 # Global logger
 _logger = None
 
