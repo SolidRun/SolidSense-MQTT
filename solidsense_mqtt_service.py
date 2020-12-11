@@ -71,8 +71,8 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
         self.led=SolidSenseLed.ledref(
             SolidSenseParameters.getParam('led'))
         if self.led != None :
-            self.led.red(255)
-            self.led.green(0)
+            self.led.in_progress()
+           
         self.exitSem = Semaphore(0)
 
         self.gw_id = settings.gateway_id

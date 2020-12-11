@@ -86,13 +86,11 @@ class MQTTWrapper(Thread):
 
     def led_green(self):
         if self._led != None :
-            self._led.red(0)
-            self._led.green(255)
+            self._led.ok()
 
     def led_red(self):
         if self._led != None :
-            self._led.green(0)
-            self._led.red(255)
+            self._led.in_progress()
 
     def _on_connect(self, client, userdata, flags, rc):
         # pylint: disable=unused-argument
