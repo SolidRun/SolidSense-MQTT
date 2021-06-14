@@ -37,9 +37,10 @@ from time import time
 from uuid import getnode
 from threading import Thread, Semaphore
 
-from mqtt_wrapper import MQTTWrapper
-from utils import ParserHelper
+from wirepas_gateway.protocol.mqtt_wrapper import MQTTWrapper
+from wirepas_gateway.utils import ParserHelper
 from utils import LoggerHelper
+
 
 import BLE_Client
 import BLE_Data
@@ -47,7 +48,7 @@ import Modem_GPS_Client
 import OBD_Client
 from mqtt_time import *
 
-from solidsense_led import *
+from wirepas_gateway.utils.solidsense_led import SolidSenseLed
 from solidsense_parameters import *
 
 
