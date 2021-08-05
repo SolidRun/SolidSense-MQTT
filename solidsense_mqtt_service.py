@@ -49,6 +49,7 @@ import OBD_Client
 from mqtt_time import *
 
 from wirepas_gateway.utils.solidsense_led import SolidSenseLed
+from wirepas_gateway.utils.connection_monitor import ConnectionMonitor
 from solidsense_parameters import *
 
 
@@ -102,7 +103,7 @@ class SolidSenseMQTTService(BLE_Client.BLE_Service_Callbacks):
             self.logger,
             self._on_mqtt_wrapper_termination_cb,
             self._on_connect,
-            led=self.led
+            connection_monitor=ConnectionMonitor(status_led=self.led)
         )
 
         if self.ble_on :
